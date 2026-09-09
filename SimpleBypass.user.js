@@ -56,6 +56,7 @@
 // @match        https://*.tapvietcode.com/*
 // @match        https://reshortfly.com/*
 // @match        https://spdmteam.com/*
+// @match        https://boostylink.com/*
 // @match        https://boblox-script.com/*
 // @grant        none
 // @downloadURL  https://github.com/OxyCoder32/all-bypass/raw/refs/heads/main/SimpleBypass.user.js
@@ -1221,81 +1222,89 @@
     }
 
     // --- Bstlar.com ---
-    if (currentUrl.includes('bstlar.com')) {
-        updateStatus('Bypassing Bstlar...');
+    if (window.location.hostname.includes('bstlar.com')) {
+        (function() {
+            let xsrfToken = '';
 
-        // Intercept fetch API
-        const { fetch: originalFetch } = window;
-        window.fetch = async (...args) => {
-            const url = args[0].toString();
-            const response = await originalFetch(...args);
+            function getCookie(name) {
+                const value = `; ${document.cookie}`;
+                const parts = value.split(`; ${name}=`);
+                if (parts.length === 2) return parts.pop().split(';').shift();
+                return null;
+            }
 
-            if (url.includes('/api/link')) {
-                updateStatus('馃幆 API intercepted...');
-                const clone = response.clone();
-                clone.json().then(async (data) => {
-                    const urlParams = new URLSearchParams(url.split('?')[1]);
-                    const linkActionId = urlParams.get('link_action_id');
-                    const linkId = data?.id;
+            function updateToken() {
+                const raw = getCookie('XSRF-TOKEN');
+                if (raw) xsrfToken = decodeURIComponent(raw);
+            }
 
-                    if (linkId && linkActionId) {
-                        updateStatus('鉁?Completing...');
-                        const completeRes = await originalFetch('/api/link-completed', {
-                            method: 'POST',
-                            headers: { 'Content-Type': 'application/json' },
-                            body: JSON.stringify({ link_id: linkId, link_action_id: linkActionId })
-                        });
-                        const completeData = await completeRes.json();
-                        if (completeData?.destination_url) {
-                            redirectWithStatus(completeData.destination_url, 'Redirecting...');
-                        }
+            function xhrPost(url, data, cb) {
+                const xhr = new XMLHttpRequest();
+                xhr.open('POST', url, true);
+                xhr.setRequestHeader('Content-Type', 'application/json;charset=UTF-8');
+                xhr.setRequestHeader('Accept', 'application/json, text/plain, */*');
+                xhr.setRequestHeader('x-xsrf-token', xsrfToken);
+                xhr.withCredentials = true;
+                xhr.onreadystatechange = function() {
+                    if (xhr.readyState === 4 && xhr.status === 200) {
+                        try { if (cb) cb(JSON.parse(xhr.responseText)); } catch(e) {}
                     }
-                }).catch(() => updateStatus('鉂?Error', true));
+                };
+                xhr.send(JSON.stringify(data));
             }
-            return response;
-        };
 
-        const originalOpen = XMLHttpRequest.prototype.open;
-        const originalSend = XMLHttpRequest.prototype.send;
+            function sleep(ms) { return new Promise(r => setTimeout(r, ms)); }
 
-        XMLHttpRequest.prototype.open = function(method, url, ...rest) {
-            this._url = url;
-            return originalOpen.call(this, method, url, ...rest);
-        };
+            function interceptXHR() {
+                const origOpen = XMLHttpRequest.prototype.open;
+                const origSend = XMLHttpRequest.prototype.send;
 
-        XMLHttpRequest.prototype.send = function(body) {
-            if (this._url && this._url.includes('/api/link')) {
-                this.addEventListener('load', () => {
-                    try {
-                        const data = JSON.parse(this.responseText);
-                        const urlParams = new URLSearchParams(this._url.split('?')[1]);
-                        const linkActionId = urlParams.get('link_action_id');
-                        const linkId = data?.id;
+                XMLHttpRequest.prototype.open = function(method, url, ...rest) {
+                    this._url = url;
+                    return origOpen.call(this, method, url, ...rest);
+                };
 
-                        if (linkId && linkActionId) {
-                            fetch('/api/link-completed', {
-                                method: 'POST',
-                                headers: { 'Content-Type': 'application/json' },
-                                body: JSON.stringify({ link_id: linkId, link_action_id: linkActionId })
-                            }).then(res => res.json()).then(completeData => {
-                                if (completeData?.destination_url) {
-                                    redirectWithStatus(completeData.destination_url, 'Redirecting...');
+                XMLHttpRequest.prototype.send = function(body) {
+                    if (this._url && this._url.includes('/api/link')) {
+                        this.addEventListener('load', function() {
+                            try {
+                                const data = JSON.parse(this.responseText);
+                                const linkId = data?.id;
+                                const linkActionId = new URLSearchParams(this._url.split('?')[1]).get('link_action_id');
+                                const tasks = data?.interactive_tasks || [];
+
+                                if (linkId && linkActionId && tasks.length) {
+                                    updateToken();
+                                    (async function() {
+                                        let done = 0;
+                                        for (const task of tasks) {
+                                            const ltid = task?.link_task_id;
+                                            const tid = task?.task_id;
+                                            if (ltid && tid) {
+                                                await new Promise(r => {
+                                                    xhrPost('/api/link-task-completed', {
+                                                        link_task_id: ltid,
+                                                        link_id: linkId,
+                                                        task_id: tid,
+                                                        link_action_id: linkActionId
+                                                    }, () => { done++; r(); });
+                                                });
+                                                await sleep(800);
+                                                updateToken();
+                                            }
+                                        }
+                                    })();
                                 }
-                            });
-                        }
-                    } catch(e) {}
-                });
+                            } catch(e) {}
+                        });
+                    }
+                    return origSend.call(this, body);
+                };
             }
-            return originalSend.call(this, body);
-        };
 
-        if (document.readyState === 'loading') {
-            document.addEventListener('DOMContentLoaded', () => {
-                document.body.appendChild(statusPanel);
-            });
-        } else {
-            document.body.appendChild(statusPanel);
-        }
+            updateToken();
+            interceptXHR();
+        })();
     }
 
     // --- go.linkify.ru ---
@@ -1958,5 +1967,145 @@
             if (!generated) generateKey();
             else clearInterval(interval);
         }, 3000);
+    }
+
+    // --- Boostylink.com ---
+    if (currentUrl.includes('boostylink.com')) {
+        updateStatus('Processing Boostylink...');
+
+        const runBoostylink = async () => {
+            try {
+                const unlockBtn = document.querySelector('.unlock-btn');
+                if (!unlockBtn) {
+                    updateStatus('Unlock button not found', true);
+                    return;
+                }
+
+                const linkId = unlockBtn.dataset.link;
+                if (!linkId) {
+                    updateStatus('Link ID not found', true);
+                    return;
+                }
+
+                const actionBtns = document.querySelectorAll('.action-btn');
+                if (actionBtns.length === 0) {
+                    updateStatus('No actions found', true);
+                    return;
+                }
+
+                updateStatus(`Found ${actionBtns.length} action(s)`);
+
+                for (let i = 0; i < actionBtns.length; i++) {
+                    const btn = actionBtns[i];
+                    const linkActionId = btn.dataset.linkactionid;
+
+                    if (!linkActionId) continue;
+
+                    updateStatus(`Processing action ${i+1}/${actionBtns.length} (ID: ${linkActionId})`);
+
+                    const startForm = new URLSearchParams();
+                    startForm.append('link_action_id', linkActionId);
+
+                    const startRes = await fetch('/api/locker_action_start.php', {
+                        method: 'POST',
+                        credentials: 'same-origin',
+                        headers: { 'Content-Type': 'application/x-www-form-urlencoded' },
+                        body: startForm.toString()
+                    });
+
+                    const startData = await startRes.json();
+                    if (startData.status !== 'ok') {
+                        updateStatus(`Action ${i+1} start failed`, true);
+                        continue;
+                    }
+
+                    let completed = false;
+                    let attempts = 0;
+                    const maxAttempts = 9;
+
+                    // Detect number of ads to bypass
+                    while (!completed && attempts < maxAttempts) {
+                        attempts++;
+
+                        const completeForm = new URLSearchParams();
+                        completeForm.append('link_action_id', linkActionId);
+
+                        const completeRes = await fetch('/api/locker_action_complete.php', {
+                            method: 'POST',
+                            credentials: 'same-origin',
+                            headers: { 'Content-Type': 'application/x-www-form-urlencoded' },
+                            body: completeForm.toString()
+                        });
+
+                        const completeData = await completeRes.json();
+
+                        if (completeData.status === 'ok') {
+                            completed = true;
+                            updateStatus(`Action ${i+1} completed!`);
+                            break;
+                            // Wait the time until api unlocks final link
+                        } else if (completeData.status === 'too_fast' || completeData.status === 'too_early') {
+                            const waitLeft = parseInt(completeData.wait_left, 10) || 5;
+                            updateStatus(`Waiting ${waitLeft}s...`);
+                            await new Promise(r => setTimeout(r, (waitLeft + 1) * 1000));
+                        } else {
+                            updateStatus(`Action ${i+1} failed: ${completeData.message || 'Unknown error'}`, true);
+                            break;
+                        }
+                    }
+
+                    if (!completed) {
+                        updateStatus(`Action ${i+1} could not be completed`, true);
+                        return;
+                    }
+
+                    if (i < actionBtns.length - 1) {
+                        await new Promise(r => setTimeout(r, 2000));
+                    }
+                }
+
+                updateStatus('All actions completed! Unlocking...');
+
+                const unlockForm = new URLSearchParams();
+                unlockForm.append('link_id', linkId);
+
+                const unlockRes = await fetch(window.location.href, {
+                    method: 'POST',
+                    credentials: 'same-origin',
+                    headers: {
+                        'Content-Type': 'application/x-www-form-urlencoded',
+                        'X-Requested-With': 'XMLHttpRequest'
+                    },
+                    body: unlockForm.toString()
+                });
+
+                const unlockData = await unlockRes.json();
+
+                if (unlockData.status === 'ok' && unlockData.data) {
+                    if (parseInt(unlockData.data.type, 10) === 2) {
+                        await navigator.clipboard.writeText(unlockData.data.content || '');
+                        updateStatus('✅ Copied to clipboard!');
+                        return;
+                    }
+
+                    if (unlockData.data.destination_url) {
+                        redirectWithStatus(unlockData.data.destination_url, '✅ Redirecting...');
+                        return;
+                    }
+                }
+
+                updateStatus('Unlock failed', true);
+
+            } catch (err) {
+                updateStatus('Error: ' + err.message, true);
+                console.error('Boostylink error:', err);
+            }
+        };
+
+        if (document.readyState === 'loading') {
+            document.addEventListener('DOMContentLoaded', runBoostylink);
+        } else {
+            setTimeout(runBoostylink, 1500);
+        }
     }
 })();
